@@ -1,8 +1,10 @@
 import re
+from unittest.mock import patch
 
 from powerbar import (
     build_dot_bar, calc_pace_pct, format_countdown, format_tasks, GREEN, YELLOW, ORANGE, RED, BLUE, DIM
 )
+from powerbar import get_git_info
 
 
 def strip_ansi(s):
@@ -165,3 +167,76 @@ def test_tasks_non_list():
 def test_tasks_malformed_items():
     tasks = [{'status': 'completed'}, {'no_status': True}, 'garbage']
     assert format_tasks(tasks) == (1, 3)
+
+
+def test_git_info_invalid_cwd_empty():
+    assert get_git_info('') is None
+
+
+def test_git_info_invalid_cwd_relative():
+    assert get_git_info('relative/path') is None
+
+
+@patch('powerbar._git')
+def test_git_info_not_a_repo(mock_git):
+    mock_git.return_value = None
+    assert get_git_info('/tmp/notarepo') is None
+
+
+@patch('powerbar._git')
+def test_git_info_full(mock_git):
+    def respond(cwd, *args):
+        return {
+            ('rev-parse', '--git-dir'): '.git',
+            ('symbolic-ref', '--short', 'HEAD'): 'main',
+            ('rev-list', '--left-right', '--count', '@{upstream}...HEAD'): '0\t2',
+            ('diff', '--numstat'): '10\t3\tfile.py',
+            ('diff', '--cached', '--numstat'): '5\t1\tother.py',
+            ('ls-files', '--others', '--exclude-standard'): 'new.py\ntemp.txt',
+        }.get(args)
+    mock_git.side_effect = respond
+    info = get_git_info('/tmp/repo')
+    assert info['branch'] == 'main'
+    assert info['ahead'] == 2
+    assert info['behind'] == 0
+    assert info['added'] == 15
+    assert info['removed'] == 4
+    assert info['untracked'] == 2
+
+
+@patch('powerbar._git')
+def test_git_info_no_upstream(mock_git):
+    def respond(cwd, *args):
+        return {
+            ('rev-parse', '--git-dir'): '.git',
+            ('symbolic-ref', '--short', 'HEAD'): 'feature',
+            ('rev-list', '--left-right', '--count', '@{upstream}...HEAD'): None,
+            ('diff', '--numstat'): None,
+            ('diff', '--cached', '--numstat'): None,
+            ('ls-files', '--others', '--exclude-standard'): None,
+        }.get(args)
+    mock_git.side_effect = respond
+    info = get_git_info('/tmp/repo')
+    assert info['branch'] == 'feature'
+    assert info['ahead'] == 0
+    assert info['behind'] == 0
+    assert info['added'] == 0
+    assert info['removed'] == 0
+    assert info['untracked'] == 0
+
+
+@patch('powerbar._git')
+def test_git_info_detached_head(mock_git):
+    def respond(cwd, *args):
+        return {
+            ('rev-parse', '--git-dir'): '.git',
+            ('symbolic-ref', '--short', 'HEAD'): None,
+            ('rev-parse', '--short', 'HEAD'): 'abc1234',
+            ('rev-list', '--left-right', '--count', '@{upstream}...HEAD'): None,
+            ('diff', '--numstat'): None,
+            ('diff', '--cached', '--numstat'): None,
+            ('ls-files', '--others', '--exclude-standard'): None,
+        }.get(args)
+    mock_git.side_effect = respond
+    info = get_git_info('/tmp/repo')
+    assert info['branch'] == 'abc1234'

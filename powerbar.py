@@ -54,6 +54,62 @@ def build_dot_bar(pct, width=10, pace_pct=None):
     return filled_str + empty_str + RESET
 
 
+def _git(cwd, *args):
+    try:
+        r = subprocess.run(
+            ['git', '-C', cwd] + list(args),
+            capture_output=True, text=True, timeout=5
+        )
+        return r.stdout.strip() if r.returncode == 0 else None
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+
+
+def get_git_info(cwd):
+    if not cwd or not os.path.isabs(cwd):
+        return None
+    if _git(cwd, 'rev-parse', '--git-dir') is None:
+        return None
+
+    branch = _git(cwd, 'symbolic-ref', '--short', 'HEAD')
+    if branch is None:
+        branch = _git(cwd, 'rev-parse', '--short', 'HEAD')
+    if branch is None:
+        return None
+
+    info = {
+        'branch': branch,
+        'ahead': 0, 'behind': 0,
+        'added': 0, 'removed': 0,
+        'untracked': 0,
+    }
+
+    counts = _git(cwd, 'rev-list', '--left-right', '--count', '@{upstream}...HEAD')
+    if counts:
+        parts = counts.split()
+        if len(parts) == 2:
+            info['behind'] = int(parts[0])
+            info['ahead'] = int(parts[1])
+
+    for diff_cmd in [('diff', '--numstat'), ('diff', '--cached', '--numstat')]:
+        output = _git(cwd, *diff_cmd)
+        if output:
+            for line in output.splitlines():
+                cols = line.split('\t')
+                if len(cols) >= 2:
+                    try:
+                        info['added'] += int(cols[0])
+                        info['removed'] += int(cols[1])
+                    except ValueError:
+                        pass
+
+    untracked_out = _git(cwd, 'ls-files', '--others', '--exclude-standard')
+    if untracked_out:
+        info['untracked'] = len(untracked_out.splitlines())
+
+    return info
+
+
 def calc_pace_pct(resets_epoch, window_secs, now=None):
     if now is None:
         now = time.time()
