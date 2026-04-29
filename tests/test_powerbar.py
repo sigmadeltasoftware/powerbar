@@ -1,7 +1,7 @@
 import re
 
 from powerbar import (
-    build_dot_bar, GREEN, YELLOW, ORANGE, RED, BLUE, DIM
+    build_dot_bar, calc_pace_pct, format_countdown, GREEN, YELLOW, ORANGE, RED, BLUE, DIM
 )
 
 
@@ -76,3 +76,55 @@ def test_dot_bar_empty_dots_always_dim():
     result = build_dot_bar(50, 10)
     empty_section = result.split('●')[-1]
     assert DIM in empty_section
+
+
+def test_pace_pct_midway():
+    assert calc_pace_pct(1000, 100, now=950) == 50
+
+
+def test_pace_pct_start():
+    assert calc_pace_pct(1000, 100, now=900) == 0
+
+
+def test_pace_pct_end():
+    assert calc_pace_pct(1000, 100, now=1000) == 100
+
+
+def test_pace_pct_clamps_before_window():
+    assert calc_pace_pct(1000, 100, now=800) == 0
+
+
+def test_pace_pct_clamps_after_window():
+    assert calc_pace_pct(1000, 100, now=1200) == 100
+
+
+def test_pace_pct_invalid_window():
+    assert calc_pace_pct(1000, 0) is None
+
+
+def test_countdown_past():
+    assert format_countdown(100, now=200) == 'now'
+
+
+def test_countdown_minutes():
+    assert format_countdown(1000, now=1000 - 2700) == '45min'
+
+
+def test_countdown_one_minute():
+    assert format_countdown(1000, now=1000 - 30) == '1min'
+
+
+def test_countdown_hours_and_minutes():
+    assert format_countdown(1000, now=1000 - 9000) == '2h 30min'
+
+
+def test_countdown_exact_hours():
+    assert format_countdown(1000, now=1000 - 10800) == '3h'
+
+
+def test_countdown_days_and_hours():
+    assert format_countdown(1000, now=1000 - 93600) == '1d 2h'
+
+
+def test_countdown_exact_days():
+    assert format_countdown(1000, now=1000 - 259200) == '3d'

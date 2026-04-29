@@ -54,6 +54,46 @@ def build_dot_bar(pct, width=10, pace_pct=None):
     return filled_str + empty_str + RESET
 
 
+def calc_pace_pct(resets_epoch, window_secs, now=None):
+    if now is None:
+        now = time.time()
+    if window_secs <= 0:
+        return None
+    window_start = resets_epoch - window_secs
+    elapsed = now - window_start
+    elapsed = max(0, min(elapsed, window_secs))
+    return round(elapsed / window_secs * 100)
+
+
+def format_countdown(epoch, now=None):
+    if now is None:
+        now = time.time()
+    diff = int(epoch - now)
+    if diff <= 0:
+        return 'now'
+    minutes = (diff + 59) // 60
+    if minutes < 60:
+        return f'{minutes}min'
+    hours = minutes // 60
+    mins = minutes % 60
+    if hours < 24:
+        return f'{hours}h {mins}min' if mins else f'{hours}h'
+    days = hours // 24
+    remaining_hours = hours % 24
+    return f'{days}d {remaining_hours}h' if remaining_hours else f'{days}d'
+
+
+def format_tasks(tasks_data):
+    if not isinstance(tasks_data, list) or len(tasks_data) == 0:
+        return None
+    total = len(tasks_data)
+    completed = sum(
+        1 for t in tasks_data
+        if isinstance(t, dict) and t.get('status') == 'completed'
+    )
+    return completed, total
+
+
 def main():
     raw = sys.stdin.read()
     if not raw.strip():
