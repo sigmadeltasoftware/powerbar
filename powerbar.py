@@ -20,6 +20,40 @@ DOT_FILLED = '●'
 DOT_EMPTY = '○'
 
 
+def build_dot_bar(pct, width=10, pace_pct=None):
+    pct = max(0, min(100, int(pct)))
+    filled = pct * width // 100
+    empty = width - filled
+
+    if pace_pct is not None:
+        above_pace = pct - pace_pct
+        if above_pace < 0:
+            color = BLUE
+        elif above_pace <= 20:
+            color = GREEN
+        elif above_pace <= 50:
+            color = YELLOW
+        else:
+            color = RED
+        filled_str = color + DOT_FILLED * filled
+    else:
+        filled_str = ''
+        for i in range(filled):
+            pos = (i + 1) * 100 // width
+            if pos >= 90:
+                c = RED
+            elif pos >= 70:
+                c = YELLOW
+            elif pos >= 50:
+                c = ORANGE
+            else:
+                c = GREEN
+            filled_str += c + DOT_FILLED
+
+    empty_str = DIM + DOT_EMPTY * empty
+    return filled_str + empty_str + RESET
+
+
 def main():
     raw = sys.stdin.read()
     if not raw.strip():
