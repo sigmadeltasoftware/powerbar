@@ -1,10 +1,12 @@
 import re
+import time as time_mod
 from unittest.mock import patch
 
 from powerbar import (
     build_dot_bar, calc_pace_pct, format_countdown, format_tasks, GREEN, YELLOW, ORANGE, RED, BLUE, DIM
 )
 from powerbar import get_git_info
+from powerbar import format_statusline
 
 
 def strip_ansi(s):
@@ -240,3 +242,127 @@ def test_git_info_detached_head(mock_git):
     mock_git.side_effect = respond
     info = get_git_info('/tmp/repo')
     assert info['branch'] == 'abc1234'
+
+
+@patch('powerbar.get_git_info')
+def test_statusline_single_line_no_rate_limits(mock_git):
+    mock_git.return_value = {
+        'branch': 'main', 'ahead': 0, 'behind': 0,
+        'added': 5, 'removed': 2, 'untracked': 0,
+    }
+    data = {
+        'workspace': {'current_dir': '/home/user/project'},
+        'model': {'display_name': 'Opus 4.6'},
+        'context_window': {'used_percentage': 42},
+    }
+    result = format_statusline(data)
+    stripped = strip_ansi(result)
+    assert '\n' not in stripped
+    assert 'project' in stripped
+    assert 'main' in stripped
+    assert 'Opus 4.6' in stripped
+    assert 'ctx' in stripped
+    assert '42%' in stripped
+
+
+@patch('powerbar.get_git_info')
+def test_statusline_two_lines_with_rate_limits(mock_git):
+    mock_git.return_value = {
+        'branch': 'main', 'ahead': 0, 'behind': 0,
+        'added': 0, 'removed': 0, 'untracked': 0,
+    }
+    now = time_mod.time()
+    data = {
+        'workspace': {'current_dir': '/home/user/project'},
+        'model': {'display_name': 'Opus 4.6'},
+        'context_window': {'used_percentage': 42},
+        'rate_limits': {
+            'five_hour': {'used_percentage': 18, 'resets_at': int(now) + 3600},
+            'seven_day': {'used_percentage': 5, 'resets_at': int(now) + 86400},
+        },
+    }
+    result = format_statusline(data)
+    stripped = strip_ansi(result)
+    assert '\n' in stripped
+    lines = stripped.split('\n')
+    assert 'project' in lines[0]
+    assert 'ctx' in lines[1]
+    assert '5h' in lines[1]
+    assert '7d' in lines[1]
+
+
+@patch('powerbar.get_git_info')
+def test_statusline_two_lines_with_tasks(mock_git):
+    mock_git.return_value = None
+    data = {
+        'workspace': {'current_dir': '/home/user/project'},
+        'model': {'display_name': 'Opus 4.6'},
+        'context_window': {'used_percentage': 10},
+        'tasks': [
+            {'status': 'completed'},
+            {'status': 'in_progress'},
+            {'status': 'pending'},
+        ],
+    }
+    result = format_statusline(data)
+    stripped = strip_ansi(result)
+    assert '\n' in stripped
+    assert 'tasks' in stripped
+    assert '1/3' in stripped
+
+
+@patch('powerbar.get_git_info')
+def test_statusline_git_details_shown(mock_git):
+    mock_git.return_value = {
+        'branch': 'feat', 'ahead': 3, 'behind': 1,
+        'added': 10, 'removed': 5, 'untracked': 2,
+    }
+    data = {
+        'workspace': {'current_dir': '/home/user/myapp'},
+        'model': {'display_name': 'Sonnet 4.6'},
+        'context_window': {'used_percentage': 75},
+    }
+    result = format_statusline(data)
+    stripped = strip_ansi(result)
+    assert 'feat' in stripped
+    assert '↑3' in stripped
+    assert '↓1' in stripped
+    assert '+10' in stripped
+    assert '-5' in stripped
+    assert '?2' in stripped
+
+
+@patch('powerbar.get_git_info')
+def test_statusline_no_git_no_model(mock_git):
+    mock_git.return_value = None
+    data = {
+        'workspace': {'current_dir': '/home/user/project'},
+        'context_window': {'used_percentage': 0},
+    }
+    result = format_statusline(data)
+    stripped = strip_ansi(result)
+    assert 'project' in stripped
+    assert 'ctx' in stripped
+    assert '\n' not in stripped
+
+
+@patch('powerbar.get_git_info')
+def test_statusline_empty_data(mock_git):
+    mock_git.return_value = None
+    result = format_statusline({})
+    stripped = strip_ansi(result)
+    assert 'ctx' in stripped
+
+
+@patch('powerbar.get_git_info')
+def test_statusline_tasks_all_done_is_green(mock_git):
+    mock_git.return_value = None
+    data = {
+        'workspace': {'current_dir': '/home/user/project'},
+        'context_window': {'used_percentage': 10},
+        'tasks': [{'status': 'completed'}, {'status': 'completed'}],
+    }
+    from powerbar import GREEN
+    result = format_statusline(data)
+    task_section = result.split('tasks')[-1]
+    assert GREEN in task_section

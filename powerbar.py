@@ -150,6 +150,83 @@ def format_tasks(tasks_data):
     return completed, total
 
 
+def _safe_int(val):
+    try:
+        return max(0, min(100, int(float(val))))
+    except (TypeError, ValueError):
+        return 0
+
+
+def format_statusline(data):
+    sep = f' {DIM}·{RESET} '
+
+    cwd = data.get('workspace', {}).get('current_dir') or data.get('cwd', '')
+    if not isinstance(cwd, str) or not cwd.startswith('/'):
+        cwd = ''
+    model = data.get('model', {}).get('display_name', '')
+
+    line1_parts = []
+    if cwd:
+        line1_parts.append(f'{BOLD}{WHITE}{os.path.basename(cwd)}{RESET}')
+
+    git = get_git_info(cwd) if cwd else None
+    if git:
+        git_str = f'{GREEN}{git["branch"]}{RESET}'
+        if git['ahead']:
+            git_str += f' {YELLOW}↑{git["ahead"]}{RESET}'
+        if git['behind']:
+            git_str += f' {YELLOW}↓{git["behind"]}{RESET}'
+        if git['added'] or git['removed']:
+            git_str += f' {CYAN}+{git["added"]} -{git["removed"]}{RESET}'
+        if git['untracked']:
+            git_str += f' {DIM}?{git["untracked"]}{RESET}'
+        line1_parts.append(git_str)
+
+    if model:
+        line1_parts.append(f'{DIM}{model}{RESET}')
+
+    ctx_pct = _safe_int(data.get('context_window', {}).get('used_percentage', 0))
+    ctx_segment = f'{DIM}ctx{RESET} {build_dot_bar(ctx_pct)} {WHITE}{ctx_pct}%{RESET}'
+
+    metrics = [ctx_segment]
+    has_rate_limits = False
+
+    rate_limits = data.get('rate_limits', {})
+    five = rate_limits.get('five_hour', {})
+    if five.get('used_percentage') is not None:
+        has_rate_limits = True
+        five_pct = _safe_int(five['used_percentage'])
+        five_resets = five.get('resets_at')
+        five_pace = calc_pace_pct(five_resets, 18000) if isinstance(five_resets, (int, float)) else None
+        five_seg = f'{DIM}5h{RESET} {build_dot_bar(five_pct, pace_pct=five_pace)} {WHITE}{five_pct}%{RESET}'
+        if isinstance(five_resets, (int, float)):
+            five_seg += f' {DIM}({format_countdown(five_resets)}){RESET}'
+        metrics.append(five_seg)
+
+    seven = rate_limits.get('seven_day', {})
+    if seven.get('used_percentage') is not None:
+        has_rate_limits = True
+        seven_pct = _safe_int(seven['used_percentage'])
+        seven_resets = seven.get('resets_at')
+        seven_pace = calc_pace_pct(seven_resets, 604800) if isinstance(seven_resets, (int, float)) else None
+        seven_seg = f'{DIM}7d{RESET} {build_dot_bar(seven_pct, pace_pct=seven_pace)} {WHITE}{seven_pct}%{RESET}'
+        if isinstance(seven_resets, (int, float)):
+            seven_seg += f' {DIM}({format_countdown(seven_resets)}){RESET}'
+        metrics.append(seven_seg)
+
+    task_result = format_tasks(data.get('tasks'))
+    has_tasks = task_result is not None
+    if task_result:
+        completed, total = task_result
+        color = GREEN if completed == total else WHITE
+        metrics.append(f'{DIM}tasks{RESET} {color}{completed}/{total}{RESET}')
+
+    if has_rate_limits or has_tasks:
+        return sep.join(line1_parts) + '\n' + sep.join(metrics)
+    else:
+        return sep.join(line1_parts + [ctx_segment])
+
+
 def main():
     raw = sys.stdin.read()
     if not raw.strip():
@@ -160,7 +237,7 @@ def main():
     except json.JSONDecodeError:
         print('Claude', end='')
         return
-    print('Claude', end='')
+    print(format_statusline(data), end='')
 
 
 if __name__ == '__main__':
