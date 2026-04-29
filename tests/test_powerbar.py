@@ -1,7 +1,7 @@
 import re
 
 from powerbar import (
-    build_dot_bar, calc_pace_pct, format_countdown, GREEN, YELLOW, ORANGE, RED, BLUE, DIM
+    build_dot_bar, calc_pace_pct, format_countdown, format_tasks, GREEN, YELLOW, ORANGE, RED, BLUE, DIM
 )
 
 
@@ -128,3 +128,40 @@ def test_countdown_days_and_hours():
 
 def test_countdown_exact_days():
     assert format_countdown(1000, now=1000 - 259200) == '3d'
+
+
+def test_tasks_none():
+    assert format_tasks(None) is None
+
+
+def test_tasks_empty_list():
+    assert format_tasks([]) is None
+
+
+def test_tasks_with_mixed_statuses():
+    tasks = [
+        {'status': 'completed'},
+        {'status': 'completed'},
+        {'status': 'in_progress'},
+        {'status': 'pending'},
+    ]
+    assert format_tasks(tasks) == (2, 4)
+
+
+def test_tasks_all_complete():
+    tasks = [{'status': 'completed'}, {'status': 'completed'}]
+    assert format_tasks(tasks) == (2, 2)
+
+
+def test_tasks_none_complete():
+    tasks = [{'status': 'pending'}, {'status': 'in_progress'}]
+    assert format_tasks(tasks) == (0, 2)
+
+
+def test_tasks_non_list():
+    assert format_tasks("not a list") is None
+
+
+def test_tasks_malformed_items():
+    tasks = [{'status': 'completed'}, {'no_status': True}, 'garbage']
+    assert format_tasks(tasks) == (1, 3)
