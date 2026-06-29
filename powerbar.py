@@ -157,6 +157,48 @@ def _safe_int(val):
         return 0
 
 
+def _int0(val):
+    try:
+        return max(0, int(val))
+    except (TypeError, ValueError):
+        return 0
+
+
+PROGRESS_FILE = os.path.expanduser('~/.claude/progress.json')
+PROGRESS_TTL = 60  # seconds; a file not updated within this is a dead run, shown no more
+
+
+def read_progress(now=None):
+    """Live build/verify progress published by `pbrun` (or any producer) to PROGRESS_FILE
+    as ``{label, done, total, started, ts}``. Returns the dict if present and fresh, else
+    None — a finished run clears the file, a crashed one goes stale past PROGRESS_TTL."""
+    now = time.time() if now is None else now
+    try:
+        with open(PROGRESS_FILE) as f:
+            p = json.load(f)
+    except (OSError, ValueError):
+        return None
+    ts = p.get('ts')
+    if not isinstance(ts, (int, float)) or now - ts > PROGRESS_TTL:
+        return None
+    return p
+
+
+def format_progress(p, now=None):
+    """A live progress segment: `⚙ label ●●●●●○○○ 7/11 12s`. With no total (indeterminate
+    build) it falls back to `⚙ label 12s`."""
+    now = time.time() if now is None else now
+    label = str(p.get('label') or 'build')[:24]
+    done, total = _int0(p.get('done')), _int0(p.get('total'))
+    started = p.get('started')
+    elapsed = f' {DIM}{int(now - started)}s{RESET}' if isinstance(started, (int, float)) else ''
+    head = f'{CYAN}⚙{RESET} {WHITE}{label}{RESET}'
+    if total > 0:
+        bar = build_dot_bar(done * 100 // total, width=8)
+        return f'{head} {bar} {WHITE}{done}/{total}{RESET}{elapsed}'
+    return f'{head}{elapsed}'
+
+
 def format_statusline(data):
     sep = f' {DIM}·{RESET} '
 
@@ -189,6 +231,12 @@ def format_statusline(data):
     ctx_segment = f'{DIM}ctx{RESET} {build_dot_bar(ctx_pct)} {WHITE}{ctx_pct}%{RESET}'
 
     metrics = [ctx_segment]
+
+    prog = read_progress()
+    has_progress = prog is not None
+    if has_progress:
+        metrics.append(format_progress(prog))
+
     has_rate_limits = False
 
     rate_limits = data.get('rate_limits', {})
@@ -221,7 +269,7 @@ def format_statusline(data):
         color = GREEN if completed == total else WHITE
         metrics.append(f'{DIM}tasks{RESET} {color}{completed}/{total}{RESET}')
 
-    if has_rate_limits or has_tasks:
+    if has_rate_limits or has_tasks or has_progress:
         return sep.join(line1_parts) + '\n' + sep.join(metrics)
     else:
         return sep.join(line1_parts + [ctx_segment])

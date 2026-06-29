@@ -12,7 +12,8 @@ A rich status line for [Claude Code](https://docs.anthropic.com/en/docs/claude-c
 - **Context window** — dot bar with gradient coloring (green → yellow → red)
 - **Rate limits** — 5-hour and 7-day usage with pace-aware coloring (blue = under pace, green → red = over pace) and countdown to reset
 - **Tasks** — completed / total count
-- **Adaptive layout** — single line when minimal, two lines when rate limits or tasks are present
+- **Build/verify progress** — a live `⚙ label ●●●●●○○○ 7/11 12s` bar for long-running commands, fed by the bundled `pbrun` wrapper (see below)
+- **Adaptive layout** — single line when minimal, two lines when rate limits, tasks, or a live build are present
 
 ## Install
 
@@ -40,6 +41,28 @@ Add to `~/.claude/settings.json`:
   }
 }
 ```
+
+## Live build/verify progress (`pbrun`)
+
+Long builds and test/verify runs go silent for minutes — you can't tell "stuck" from "working".
+`pbrun` wraps such a command, streams its output unchanged, and publishes `[N/M]` progress to
+`~/.claude/progress.json`, which powerbar renders live:
+
+```
+ctx ●●●●○○○○○○ 42%  ·  ⚙ verify hydra-core ●●●●●○○○ 7/11 12s
+```
+
+```bash
+# Any command that prints [i/N] markers (e.g. `synapse verify-proofs` streams [7/11] …):
+python3 ~/.claude/pbrun.py --label "verify hydra-core" -- synapse verify-proofs --flow hydra-core --jobs 6
+
+# No markers? You still get the label + elapsed time (an indeterminate spinner):
+python3 ~/.claude/pbrun.py --label "build" -- cargo test -p hydra-core
+```
+
+The file is written atomically and removed on exit; powerbar also ignores any progress file
+older than 60s, so a crashed run never leaves a phantom bar. Any tool can drive the segment by
+writing `{label, done, total, started, ts}` to `~/.claude/progress.json`.
 
 ## Requirements
 
