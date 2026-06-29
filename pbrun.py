@@ -1,47 +1,73 @@
 #!/usr/bin/env python3
-"""pbrun — run a command, stream its output, and publish ``[done/total]`` progress to
-``~/.claude/progress.json`` so powerbar can show a live bar in the status line.
+"""pbrun — run a command, stream its output, and publish live progress to
+``~/.claude/progress.json`` so powerbar can show a status-line bar.
 
-Turns a silent multi-minute build/verify into a glance: instead of wondering "is it stuck or
-working?", powerbar renders ``⚙ verify hydra-core ●●●●●○○○ 7/11 12s``.
-
-It scans the wrapped command's output for ``[i/N]`` progress markers — the format
-``synapse verify-proofs`` already streams (``[7/11] flow: invariant … (compiling+testing)``).
-With no marker yet it still shows the label + elapsed time (an indeterminate spinner).
+Turns a silent multi-minute build/verify into a glance: instead of "is it stuck or working?",
+powerbar renders ``⚙ verify hydra-core ●●●●●○○○ 7/11 12s`` (determinate, from ``[i/N]`` markers
+that e.g. ``synapse verify-proofs`` emits) or ``⚙ build 42s`` (indeterminate — elapsed only —
+for tools like ``cargo`` that don't emit a count).
 
     pbrun --label "verify hydra-core" -- synapse verify-proofs --flow hydra-core --jobs 6
-    pbrun -- cargo test -p hydra-core            # no [i/N] -> label + elapsed only
+    pbrun -- cargo test -p hydra-core            # no [i/N] -> label + ticking elapsed
 
-The file is written atomically and removed on exit; powerbar also ignores any file older than
-its TTL, so a crashed run never leaves a phantom bar.
+A background heartbeat re-stamps the file every second, so the bar stays alive (and the elapsed
+keeps ticking) even while the wrapped command is silent — e.g. a long cargo compile with no
+output. The file is written atomically and removed on exit; powerbar also ignores any file
+older than its TTL, so a crashed run never leaves a phantom bar.
+
+NOTE: for the bar to update live *during* a long command, the powerbar status-line needs
+``"refreshInterval": 1000`` (Claude Code >= 2.1.97), set by powerbar's install.sh — otherwise
+the status line only re-renders on events and freezes for the duration of the command.
 """
 import json
 import os
 import re
 import subprocess
 import sys
+import threading
 import time
 
 PROGRESS_FILE = os.path.expanduser("~/.claude/progress.json")
 MARKER = re.compile(rb"\[(\d+)/(\d+)\]")  # e.g. [7/11]
 
 
-def _write(state):
-    tmp = PROGRESS_FILE + ".tmp"
-    try:
-        os.makedirs(os.path.dirname(PROGRESS_FILE), exist_ok=True)
-        with open(tmp, "w") as f:
-            json.dump(state, f)
-        os.replace(tmp, PROGRESS_FILE)  # atomic — powerbar never reads a half-written file
-    except OSError:
-        pass
+class Progress:
+    def __init__(self, label):
+        self._lock = threading.Lock()
+        now = time.time()
+        self._state = {"label": label, "done": 0, "total": 0, "started": now, "ts": now}
+        self._alive = True
 
+    def flush(self):
+        with self._lock:
+            self._state["ts"] = time.time()
+            data = dict(self._state)
+        tmp = PROGRESS_FILE + ".tmp"
+        try:
+            os.makedirs(os.path.dirname(PROGRESS_FILE), exist_ok=True)
+            with open(tmp, "w") as f:
+                json.dump(data, f)
+            os.replace(tmp, PROGRESS_FILE)  # atomic — powerbar never reads a half-written file
+        except OSError:
+            pass
 
-def _clear():
-    try:
-        os.remove(PROGRESS_FILE)
-    except OSError:
-        pass
+    def update(self, done, total):
+        with self._lock:
+            self._state["done"], self._state["total"] = done, total
+
+    def heartbeat(self):
+        # re-stamp ts every second so the file stays fresh (and elapsed ticks) during silent
+        # phases — a long compile may emit no lines for minutes.
+        while self._alive:
+            self.flush()
+            time.sleep(1)
+
+    def stop(self):
+        self._alive = False
+        try:
+            os.remove(PROGRESS_FILE)
+        except OSError:
+            pass
 
 
 def main(argv):
@@ -55,11 +81,11 @@ def main(argv):
     if not argv:
         sys.exit("usage: pbrun [--label L] -- <command> [args...]")
 
-    started = time.time()
-    state = {"label": label, "done": 0, "total": 0, "started": started, "ts": started}
-    _write(state)
+    prog = Progress(label)
+    prog.flush()
+    threading.Thread(target=prog.heartbeat, daemon=True).start()
 
-    # Merge stderr into stdout so we see markers from either stream (synapse streams to stderr),
+    # Merge stderr into stdout so we catch markers from either stream (synapse streams to stderr),
     # and re-emit every line so the wrapped command still looks normal in the terminal.
     proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
@@ -70,15 +96,13 @@ def main(argv):
             for last in MARKER.finditer(line):
                 pass  # keep the LAST marker on the line
             if last is not None:
-                state.update(done=int(last.group(1)), total=int(last.group(2)))
-            state["ts"] = time.time()  # heartbeat so powerbar knows the run is alive
-            _write(state)
+                prog.update(int(last.group(1)), int(last.group(2)))
         rc = proc.wait()
     except KeyboardInterrupt:
         proc.terminate()
         rc = 130
     finally:
-        _clear()
+        prog.stop()
     return rc
 
 
