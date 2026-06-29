@@ -64,6 +64,13 @@ The file is written atomically and removed on exit; powerbar also ignores any pr
 older than 60s, so a crashed run never leaves a phantom bar. Any tool can drive the segment by
 writing `{label, done, total, started, ts}` to `~/.claude/progress.json`.
 
+> **Live ticking needs `refreshInterval`.** By default Claude Code only re-renders the status line
+> on events (new message, tool start/finish), so during a single long command it *freezes*. The
+> installer sets `"refreshInterval": 1000` on the `statusLine` config (Claude Code ≥ 2.1.97), which
+> re-runs the script every second so the progress bar keeps advancing throughout the command. The
+> transcript area itself can't be driven by an external process — the status line is the only live
+> surface — so this is what makes per-second progress actually move.
+
 ## Requirements
 
 - Python 3.6+

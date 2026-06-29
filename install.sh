@@ -25,7 +25,10 @@ try:
         config = json.load(f)
 except (FileNotFoundError, json.JSONDecodeError):
     config = {}
-config['statusLine'] = {'type': 'command', 'command': 'python3 ~/.claude/powerbar.py'}
+# refreshInterval (Claude Code >= 2.1.97) re-runs the statusline on a 1s timer IN ADDITION to
+# event updates — so the live build/verify progress segment keeps ticking during a long command
+# (without it the status line freezes until the command returns).
+config['statusLine'] = {'type': 'command', 'command': 'python3 ~/.claude/powerbar.py', 'refreshInterval': 1000}
 with open(path, 'w') as f:
     json.dump(config, f, indent=2)
     f.write('\n')
